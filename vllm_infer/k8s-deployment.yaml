@@ -1,0 +1,127 @@
+# Qwen3-8B-AWQ vLLM 部署（gpu-node-example / RTX 5070 Ti）
+# - 不设置 runtimeClassName（集群无 nvidia RuntimeClass）
+# - 容忍 taint nvidia.com/gpu Exists NoSchedule
+# - 与 student_v8 BERT 可能共卡：GPU_MEMORY_UTILIZATION 默认 0.80，可按需下调
+# - 模型权重：hostPath /data/models/Qwen3-8B-AWQ -> 容器 /models/Qwen3-8B-AWQ（与 embedding 惯例 /data/models 一致）
+# 使用前请将镜像推到 Harbor 并按需改 image 字段；本仓库只提供清单，不 apply。
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-qwen3-8b-awq
+  labels:
+    app: vllm-qwen3-8b-awq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-qwen3-8b-awq
+  template:
+    metadata:
+      labels:
+        app: vllm-qwen3-8b-awq
+    spec:
+      # 集群无 RuntimeClass nvidia：显式不写 runtimeClassName
+      nodeSelector:
+        kubernetes.io/hostname: gpu-node-example
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: your-registry.example.com/ai/vllm:qwen3-8b-awq-v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: MODEL_PATH
+              value: /models/Qwen3-8B-AWQ
+            - name: SERVED_MODEL_NAME
+              value: Qwen3-8B-AWQ
+            - name: PORT
+              value: "8000"
+            - name: MAX_MODEL_LEN
+              value: "8192"
+            - name: GPU_MEMORY_UTILIZATION
+              value: "0.80"
+            - name: MAX_NUM_SEQS
+              value: "8"
+            - name: QUANTIZATION
+              value: awq_marlin
+            - name: DTYPE
+              value: bfloat16
+            - name: ATTENTION_BACKEND
+              value: TRITON_ATTN
+            - name: REASONING_PARSER
+              value: qwen3
+            - name: ENABLE_REASONING_PARSER
+              value: "1"
+            # 需要鉴权时取消注释并改为 Secret：
+            # - name: VLLM_API_KEY
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: vllm-qwen3-api
+            #       key: api-key
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+            requests:
+              nvidia.com/gpu: "1"
+              memory: 8Gi
+              cpu: "2"
+          volumeMounts:
+            - name: model
+              mountPath: /models/Qwen3-8B-AWQ
+              readOnly: true
+            - name: dshm
+              mountPath: /dev/shm
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+      volumes:
+        - name: model
+          hostPath:
+            path: /data/models/Qwen3-8B-AWQ
+            type: Directory
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-qwen3-8b-awq
+  labels:
+    app: vllm-qwen3-8b-awq
+spec:
+  type: ClusterIP
+  selector:
+    app: vllm-qwen3-8b-awq
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

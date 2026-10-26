@@ -1,0 +1,14 @@
+# 模型与数据一律挂载，不打进镜像
+models/
+data/
+docs/
+dev-task/
+tests/
+*.md
+*.xlsx
+*.csv
+.venv/
+.git/
+__pycache__/
+*.pyc
+.DS_Store

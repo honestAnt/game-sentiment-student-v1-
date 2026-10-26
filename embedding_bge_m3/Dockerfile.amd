@@ -1,0 +1,44 @@
+# bge-m3 embedding 推理镜像（linux/amd64）
+#
+# 基础镜像：官方 PyTorch runtime（CUDA 13.0）。可选：
+#   pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+# 模型权重不进镜像，运行时挂载到 MODEL_DIR（默认 /models，子目录 bge-m3）。
+#
+# 构建（在 embedding_bge_m3 目录）：
+#   docker build --platform=linux/amd64 -f Dockerfile.amd \
+#     -t your-registry.example.com/ai/embedding:bge-m3-v1 .
+#
+FROM --platform=linux/amd64 pytorch/pytorch:2.14.0-cuda13.0-cudnn9-runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    MODEL_DIR=/models \
+    MODEL_SUBDIR=bge-m3 \
+    MODEL_NAME=bge-m3 \
+    MAX_BATCH=64 \
+    NORMALIZE=0 \
+    PORT=8000
+
+WORKDIR /app
+EXPOSE 8000
+
+# torch 已由基础镜像提供；模型权重外挂，不 COPY 权重。
+# 官方 pytorch runtime 的 Python 受 PEP 668 管理，容器内 pip 需 --break-system-packages。
+RUN pip install --no-cache-dir --break-system-packages \
+      -i https://mirrors.aliyun.com/pypi/simple/ \
+      transformers==4.46.3 \
+      tokenizers==0.20.3 \
+      fastapi==0.141.1 \
+      uvicorn==0.52.4 \
+      sentence-transformers==3.3.1
+
+# 清理历史的缓存      
+RUN rm -rf /app/**
+
+COPY embedding_bge_m3/app.py embedding_bge_m3/entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+
+ENTRYPOINT ["./entrypoint.sh"]

@@ -1,0 +1,35 @@
+# 本地 macOS（Apple Silicon）测试镜像 —— CPU 推理
+#
+# 与正式 Dockerfile（RTX 5080）的差异：
+#   1. macOS 容器没有 GPU 直通（无 CUDA/MPS），纯 CPU 推理，torch 用 PyPI 官方
+#      linux/aarch64 CPU 轮子，不装 cu128（省 2GB+ 镜像体积）；
+#   2. 代码、依赖版本（除 torch 的 CUDA 后缀外）、entrypoint 双入口与正式镜像完全一致，
+#      本地验证过的行为可直接迁移到 GPU 机器。
+#
+# 构建：docker build -f Dockerfile.arm -t sentiment-infer:v5-arm .
+# 用法与正式镜像相同：batch / api 两个入口（见 docs/推理服务部署说明-RTX5080.md）
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
+WORKDIR /app
+
+# 依赖版本与开发环境/GPU 镜像对齐（torch 为同版本 CPU 构建）。
+# 使用阿里云 PyPI 镜像（pypi.org 直连在境内构建经常超时）；换回官方源删掉 -i 即可。
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ torch==2.7.1 \
+ && pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
+      transformers==4.46.3 \
+      tokenizers==0.20.3 \
+      pandas==3.0.5 \
+      numpy==1.26.4 \
+      fastapi==0.141.1 \
+      uvicorn==0.52.4
+
+COPY infer_batch.py infer_api.py config.py platform_input.py entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+
+ENTRYPOINT ["./entrypoint.sh"]

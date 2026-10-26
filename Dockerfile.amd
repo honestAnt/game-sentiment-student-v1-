@@ -1,0 +1,78 @@
+# 情感推理镜像（linux/amd64）：student_v8 + 在线/批量双入口
+#
+# 目标：x86_64 / amd64 GPU 节点（例如 RTX 5070 Ti / Blackwell）。
+# 基础镜像使用官方 PyTorch runtime（CUDA 13.0），避免自行 pip 安装 torch+cu 依赖。
+# 若 13.0 在目标机不兼容，可改为：pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+#
+# 与 Dockerfile.arm 成对：
+#   Dockerfile.amd  — linux/amd64 + CUDA（生产 GPU）
+#   Dockerfile.arm  — linux/aarch64 CPU（本机 Apple Silicon 冒烟）
+# 本文件显式锁定 --platform=linux/amd64，避免在 ARM 宿主机上误建成 aarch64。
+#
+# 双入口（entrypoint.sh）：
+#   batch: python infer_batch.py ...
+#   api:   uvicorn infer_api:app   （POST /predict，GET /health）
+#
+# 构建（在 amd64 机器或启用 buildx 的环境）：
+#   docker build --platform=linux/amd64 -f Dockerfile.amd -t sentiment-infer:v8-amd .
+#
+# 运行示例（模型 volume/PVC 外挂，不打进镜像；ENV 默认即 v8 工作点）：
+#   API：
+#     docker run --gpus all -d --name sentiment-api -p 8000:8000 --restart unless-stopped \
+#       -v $PWD/models:/app/models:ro \
+#       sentiment-infer:v8-amd api
+#     # 覆盖示例：-e CONF_THRESHOLD=0.7 -e BATCH_SIZE=512 -e PORT=8080
+#   批量：
+#     docker run --gpus all --rm \
+#       -v $PWD/models:/app/models -v $PWD/data:/app/data \
+#       sentiment-infer:v8-amd batch \
+#       --model_dir models/student_v8 --input data/raw/daily.csv \
+#       --output data/predictions/daily.jsonl --review_output data/candidates/lowconf.jsonl \
+#       --neg_exempt
+FROM --platform=linux/amd64 pytorch/pytorch:2.14.0-cuda13.0-cudnn9-runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
+WORKDIR /app
+
+# ---- 部署可覆盖环境变量（docker -e / kubectl env 均可改，无需重建镜像）----
+# MODEL_DIR           模型目录（volume 挂载点下的相对路径）
+# CONF_THRESHOLD      置信回退阈值，默认 0.75（v8 工作点）
+# NEG_EXEMPT          1=负面豁免回退（v8）；回退旧模型设 0
+# PREFIX              auto|on|off；auto 时目录名版本号 ≥ v8 启用平台前缀
+# WEIBO_COMMENT_RAW   1=微博评论跳过豁免回退（实验开关，默认关）
+# MAX_BATCH           单次 /predict 请求上限
+# BATCH_SIZE          内部推理批大小（GPU 建议 256；不设则按设备自动选）
+# PORT                API 监听端口（entrypoint 读取）
+ENV MODEL_DIR=models/student_v8 \
+    CONF_THRESHOLD=0.75 \
+    NEG_EXEMPT=1 \
+    PREFIX=auto \
+    WEIBO_COMMENT_RAW=0 \
+    MAX_BATCH=256 \
+    BATCH_SIZE=256 \
+    PORT=8000
+
+EXPOSE 8000
+
+# torch 已由基础镜像提供。模型权重不进镜像：.dockerignore 排除 models/，运行时 volume/PVC 挂载。
+# 官方 pytorch runtime 的 Python 受 PEP 668 管理，容器内 pip 需 --break-system-packages。
+RUN pip install --no-cache-dir --break-system-packages \
+      transformers==4.46.3 \
+      tokenizers==0.20.3 \
+      pandas==3.0.5 \
+      fastapi==0.141.1 \
+      uvicorn==0.52.4
+
+# 只拷贝推理必需代码；models/ 与 data/ 运行时挂载
+# platform_input.py 是 v8 前缀输入唯一真源，必须打入
+RUN rm -rf infer_batch.py infer_api.py config.py platform_input.py entrypoint.sh
+
+COPY infer_batch.py infer_api.py config.py platform_input.py entrypoint.sh ./
+RUN chmod +x entrypoint.sh
+
+ENTRYPOINT ["./entrypoint.sh"]

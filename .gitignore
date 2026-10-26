@@ -1,0 +1,46 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+
+# 本地权重与打包产物（用 share_student.py 分发，勿提交）
+models/
+dist/
+*.safetensors
+*.bin
+
+# 评测表、导出结果与真实语料（含用户原文，不要入库）
+*.xlsx
+.~*
+data/predictions/
+data/raw/
+data/labeled/
+data/candidates/
+data/validation/
+data/needs_review/
+data/review/
+data/candidates/*/pool_scored.jsonl
+
+# 环境与密钥
+.env
+.env.*
+!.env.example
+*.pem
+
+# 系统 / 编辑器
+.DS_Store
+.idea/
+.vscode/
+
+# 训练/评测日志（本地）
+logs/
+
+# 本地 agent 状态
+.superpowers/
+dev-task/
+# local docker build cache (torch wheels etc.)
+.docker-build-cache/

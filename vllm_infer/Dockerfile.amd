@@ -1,0 +1,57 @@
+# Qwen3-8B-AWQ vLLM 推理镜像（linux/amd64）
+#
+# 目标节点：Blackwell GPU（例如 RTX 5070 Ti / sm_120，CUDA 13.x）
+#
+# ========== 为何不用 pytorch/pytorch:2.14.0-cuda13.0-cudnn9-runtime ==========
+# 用户偏好该 PyTorch 官方 runtime，但当前最新稳定 vLLM（0.27.1，2026-08）固定依赖
+# PyTorch 2.13.0 + Triton 3.7.1（见 https://github.com/vllm-project/vllm/releases/tag/v0.27.0 ）。
+# 在 2.14 基础镜像上 pip install vllm 会强制降级/替换 torch，与 runtime 自带栈冲突，
+# 且 vLLM 含大量与 torch 版本绑定的 CUDA 自定义算子；自行拼装极易在 sm_120 上踩坑。
+# PyPI 0.27.x 提供的官方 wheel 主要是 +cu129，并非「在 cu130 torch 2.14 上直接装就完事」。
+#
+# 因此本 Dockerfile 以官方 vllm/vllm-openai 为基镜像（已内置匹配的 torch/CUDA/算子）。
+# 已在 Docker Hub 核实存在的标签（2026-09-24）：
+#   vllm/vllm-openai:v0.27.1
+#     manifest list digest: sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
+#     linux/amd64 digest:    sha256:c2f3b1b964e47809b722b5e75b61b1e7b39a50f70388cf2bf2418f16a9f31da2
+# 同系列 ubuntu2404 变体层信息显示 CUDA_VERSION=13.0.2，与节点驱动 595（CUDA 13.x）匹配。
+# 备选：vllm/vllm-openai:cu130-nightly（Blackwell 文档偶有推荐；滚动标签，生产勿直接 pin）。
+#
+# 模型权重不进镜像：运行时 volume/PVC 挂载到 MODEL_PATH（默认 /models/Qwen3-8B-AWQ）。
+#
+# 构建（在 vllm_infer 目录）：
+#   docker build --platform=linux/amd64 -f Dockerfile.amd \
+#     -t your-registry.example.com/ai/vllm:qwen3-8b-awq-v1 .
+
+FROM --platform=linux/amd64 vllm/vllm-openai:v0.27.1
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    MODEL_PATH=/models/Qwen3-8B-AWQ \
+    SERVED_MODEL_NAME=Qwen3-8B-AWQ \
+    HOST=0.0.0.0 \
+    PORT=8000 \
+    MAX_MODEL_LEN=8192 \
+    GPU_MEMORY_UTILIZATION=0.80 \
+    MAX_NUM_SEQS=8 \
+    QUANTIZATION=awq_marlin \
+    DTYPE=bfloat16 \
+    ATTENTION_BACKEND=TRITON_ATTN \
+    REASONING_PARSER=qwen3 \
+    ENABLE_REASONING_PARSER=1 \
+    TENSOR_PARALLEL_SIZE=1 \
+    TRUST_REMOTE_CODE=0
+
+# 可选：VLLM_API_KEY（非空则启用 --api-key）
+# 可选：EXTRA_ARGS（追加原样透传给 vllm serve）
+
+WORKDIR /app
+EXPOSE 8000
+
+# 官方镜像 ENTRYPOINT 多为 vllm 本体；覆盖为我们的启动脚本以便 ENV 可配。
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]

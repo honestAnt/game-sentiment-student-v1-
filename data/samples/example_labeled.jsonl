@@ -1,0 +1,4 @@
+{"id":"demo-1","text":"这把运营真的逆天，匹配到的队友全程挂机。","platform":"bilibili","content_type":"评论","final_label":"负面","final_emotion":"愤怒","reason":"明确抱怨匹配"}
+{"id":"demo-2","text":"新赛季地图还行，先打两把再看强度。","platform":"weibo","content_type":"评论","final_label":"中性","final_emotion":"其他","reason":"没有明确褒贬"}
+{"id":"demo-3","text":"这个角色手感太好了，连招很顺，推荐入坑。","platform":"xiaohongshu","content_type":"笔记","final_label":"正面","final_emotion":"惊喜","reason":"明确推荐"}
+{"id":"demo-4","text":"求一个新手配装，评论区见。","platform":"douyin","content_type":"评论","final_label":"中性","final_emotion":"无关/灌水","reason":"求助提问"}
